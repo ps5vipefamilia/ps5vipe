@@ -1,6 +1,5 @@
-// Firebase Cloud Messaging Service Worker
-importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: "AIzaSyAdz7MAFTT8LB73jYPNNAE3RehHbKIkRyI",
@@ -15,12 +14,12 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const { title, body, icon } = payload.notification;
+  const title = payload.notification?.title || 'PS5 ViPe';
+  const body = payload.notification?.body || '';
   self.registration.showNotification(title, {
     body,
-    icon: icon || '/icon-192.png',
-    badge: '/icon-192.png',
-    vibrate: [200, 100, 200],
-    data: payload.data
+    icon: './icon-192.png',
+    badge: './icon-192.png',
+    vibrate: [200, 100, 200]
   });
 });
