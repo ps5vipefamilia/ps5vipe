@@ -439,10 +439,10 @@ const S = {
   tokenTransfer: 1,
   def() {
     return {
-      config:{ maxSession:5, minSlot:30, tokenMins:15, tokenExpire:'sunday',
+      config:{ maxSession:5, minSlot:30, tokenMins:15, tokenExpire:'never',
         weekdayStart:'15:00', weekdayEnd:'23:00', weekendStart:'09:00', weekendEnd:'23:59',
         santiLimit:25, daniLimit:20, lockoutEnabled:true, pinNotif:true,
-        santiNoLimit:false, daniNoLimit:false, lastWeekCheck:'' },
+        santiNoLimit:false, daniNoLimit:false, lastWeekCheck:'', bookingWeeks:2 },
       pins:{}, locks:{jose:0,mafe:0,santi:0,dani:0},
       blocked:{jose:false,mafe:false,santi:false,dani:false},
       pinDates:{jose:'',mafe:'',santi:'',dani:''},
@@ -1350,10 +1350,20 @@ function renderPaConfig() {
       <div class="fg2"><label class="flabel">1 token = (minutos)</label><input type="number" id="cfg-tmins" min="5" max="60" value="${cfg.tokenMins||15}"></div>
       <div class="fg2"><label class="flabel">Tokens caducan</label>
         <select id="cfg-texp">
+          <option value="never" ${(cfg.tokenExpire||'never')==='never'?'selected':''}>Nunca (recomendado)</option>
           <option value="sunday" ${cfg.tokenExpire==='sunday'?'selected':''}>Domingo 23:59</option>
           <option value="monthly" ${cfg.tokenExpire==='monthly'?'selected':''}>Fin de mes</option>
-          <option value="never" ${cfg.tokenExpire==='never'?'selected':''}>Nunca</option>
         </select>
+      </div>
+      <div class="fg2"><label class="flabel">Antelación máxima para reservar</label>
+        <select id="cfg-bweeks">
+          <option value="1" ${(cfg.bookingWeeks||2)==1?'selected':''}>1 semana</option>
+          <option value="2" ${(cfg.bookingWeeks||2)==2?'selected':''}>2 semanas (recomendado)</option>
+          <option value="3" ${(cfg.bookingWeeks||2)==3?'selected':''}>3 semanas</option>
+          <option value="4" ${(cfg.bookingWeeks||2)==4?'selected':''}>4 semanas (1 mes)</option>
+          <option value="8" ${(cfg.bookingWeeks||2)==8?'selected':''}>8 semanas (2 meses)</option>
+        </select>
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px">Define con cuántas semanas de antelación se puede reservar la PS5</div>
       </div>
     </div>
     <div class="card">
@@ -1479,8 +1489,11 @@ function openReserve() {
     userWrap.style.display = 'none';
   }
   
+  const cfg = S.data.config || {};
+  const weeks = cfg.bookingWeeks || 2;
+  const days = weeks * 7;
   const dayEl=document.getElementById('res-day');
-  dayEl.innerHTML=Array.from({length:7},(_,i)=>{
+  dayEl.innerHTML=Array.from({length:days},(_,i)=>{
     const d=new Date(); d.setDate(d.getDate()+i);
     const val=d.toISOString().split('T')[0];
     const lbl=i===0?'Hoy, '+d.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'short'}):d.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'short'});
@@ -1642,6 +1655,7 @@ async function saveConfig() {
     weekendEnd:document.getElementById('cfg-wee').value,
     santiLimit:parseInt(document.getElementById('cfg-slim').value)||25,
     daniLimit:parseInt(document.getElementById('cfg-dlim').value)||20,
+    bookingWeeks:parseInt(document.getElementById('cfg-bweeks').value)||2,
     lockoutEnabled:(S.data.config||{}).lockoutEnabled!==false,
     pinNotif:(S.data.config||{}).pinNotif!==false,
     santiNoLimit:document.getElementById('sw-snl')?.classList.contains('on')||false,
