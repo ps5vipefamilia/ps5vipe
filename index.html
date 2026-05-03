@@ -1311,14 +1311,15 @@ function renderAgenda(){
     // Conflict list
     const conflictsList=conflicts.length===0?'':conflicts.map(c=>{
       const sorted=[c.a,c.b].sort((a,b)=>(a.ts||0)-(b.ts||0));
-      return`<button class="slot-conflict-btn" onclick="showConflictModal(${JSON.stringify(sorted[0])},${JSON.stringify(sorted[1])})">
-        <div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%;flex-shrink:0"></div>
-        <div style="flex:1">
-          <div style="font-weight:700;font-size:13px">⚡ Conflicto: ${uname(sorted[0].user)} vs ${uname(sorted[1].user)}</div>
-          <div style="font-size:12px;color:#64748b">${sorted[0].date} · 1º ${uname(sorted[0].user)} (${relTime(sorted[0].ts||0)}) · 2º ${uname(sorted[1].user)} (${relTime(sorted[1].ts||0)})</div>
-        </div>
-        <span style="color:#ef4444;font-size:18px">›</span>
-      </button>`;
+      const id1=sorted[0].id, id2=sorted[1].id;
+      return '<button type="button" class="slot-conflict-btn" onclick="openConflictById(\'' + id1 + '\',\'' + id2 + '\')">'
+        + '<div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%;flex-shrink:0"></div>'
+        + '<div style="flex:1">'
+        + '<div style="font-weight:700;font-size:13px">⚡ Conflicto: ' + uname(sorted[0].user) + ' vs ' + uname(sorted[1].user) + '</div>'
+        + '<div style="font-size:12px;color:#64748b">' + sorted[0].date + ' · 1º ' + uname(sorted[0].user) + ' (' + relTime(sorted[0].ts||0) + ') · 2º ' + uname(sorted[1].user) + ' (' + relTime(sorted[1].ts||0) + ')</div>'
+        + '</div>'
+        + '<span style="color:#ef4444;font-size:18px">›</span>'
+        + '</button>';
     }).join('');
 
     content=`
@@ -1615,7 +1616,17 @@ function renderPaStats(){
     </div>
     <div class="card">
       <div class="ctitle">⚡ Conflictos activos</div>
-      <div class="stat"><div class="slabel">Conflictos detectados</div><div class="sval">${conflicts}</div></div>
+      ${conflicts===0
+        ? `<div class="stat"><div class="slabel">Conflictos detectados</div><div class="sval">0</div><div class="ssub">Sin conflictos</div></div>`
+        : `<button type="button" class="slot-conflict-btn" onclick="showStatsConflicts()" style="width:100%;margin-bottom:8px">
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:15px;color:#ef4444">⚡ ${conflicts} conflicto(s) activo(s)</div>
+              <div style="font-size:12px;color:#64748b;margin-top:4px">Toca para ver y resolver →</div>
+            </div>
+            <span style="color:#ef4444;font-size:20px">›</span>
+          </button>
+          <div id="stats-conflicts-list" style="margin-top:4px"></div>`
+      }
     </div>
     <div class="card">
       <div class="ctitle">🪙 Balance de tokens</div>
@@ -2166,6 +2177,48 @@ function toggleSw(swId,cfgKey){
     if(el.classList.contains('on'))sendNotif('🎉 ¡Día especial!','Hoy no tienes límite de tiempo de juego',[who]);
     logActivity('config',`${uname(S.user)} ${el.classList.contains('on')?'activó':'desactivó'} 'Sin límite' para ${uname(who)}`);
   }
+}
+
+// ═══ CONFLICT HELPERS ═══
+function openConflictById(id1, id2){
+  const res = S.data.reservations || [];
+  const r1 = res.find(r => r.id === id1);
+  const r2 = res.find(r => r.id === id2);
+  if(r1 && r2) showConflictModal(r1, r2);
+  else toast('Las reservas ya no existen', 'w');
+}
+
+function showStatsConflicts(){
+  const listEl = document.getElementById('stats-conflicts-list');
+  if(!listEl) return;
+  const conflicts = getAllConflicts();
+  if(listEl.innerHTML !== '' && listEl.dataset.open === '1'){
+    listEl.innerHTML = '';
+    listEl.dataset.open = '0';
+    return;
+  }
+  if(conflicts.length === 0){
+    listEl.innerHTML = '<div class="alert as" style="margin-top:8px">✅ Sin conflictos activos</div>';
+  } else {
+    listEl.innerHTML = buildConflictListHtml(conflicts);
+  }
+  listEl.dataset.open = '1';
+}
+
+function buildConflictListHtml(conflicts){
+  return conflicts.map(c => {
+    const sorted = [c.a, c.b].sort((a,b) => (a.ts||0)-(b.ts||0));
+    const id1 = sorted[0].id;
+    const id2 = sorted[1].id;
+    return '<button type="button" class="slot-conflict-btn" onclick="openConflictById(\'' + id1 + '\',\'' + id2 + '\')">'
+      + '<div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%;flex-shrink:0"></div>'
+      + '<div style="flex:1">'
+      + '<div style="font-weight:700;font-size:13px">⚡ ' + uname(sorted[0].user) + ' vs ' + uname(sorted[1].user) + '</div>'
+      + '<div style="font-size:12px;color:#64748b">' + sorted[0].date + ' · 1º ' + uname(sorted[0].user) + ' (' + relTime(sorted[0].ts||0) + ') · 2º ' + uname(sorted[1].user) + ' (' + relTime(sorted[1].ts||0) + ')</div>'
+      + '</div>'
+      + '<span style="color:#ef4444;font-size:18px">›</span>'
+      + '</button>';
+  }).join('');
 }
 
 // ═══ INIT ═══
