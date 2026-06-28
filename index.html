@@ -474,10 +474,12 @@ const S={
         weekdayStart:'15:00', weekdayEnd:'23:00',
         weekendStart:'09:00', weekendEnd:'23:59',
         santiLimit:25, daniLimit:20,
+        santiDailyLimit:5, daniDailyLimit:5,
+        maxDailyOps:6,
         lockoutEnabled:true, pinNotif:true,
         santiNoLimit:false, daniNoLimit:false,
         bookingWeeks:2, lastWeekCheck:'',
-        vacations:[] // [{id,name,start,end,weekdayStart,weekdayEnd,weekendStart,weekendEnd,santiLimit,daniLimit}]
+        vacations:[], recurringReservations:[] // [{id,name,start,end,weekdayStart,weekdayEnd,weekendStart,weekendEnd,santiLimit,daniLimit}]
       },
       pins:{}, locks:{jose:0,mafe:0,santi:0,dani:0},
       blocked:{jose:false,mafe:false,santi:false,dani:false},
@@ -600,6 +602,28 @@ function weekUsed(user){
   const ws=weekStart();
   return(S.data.reservations||[]).filter(r=>r.user===user&&new Date(r.date)>=ws)
     .reduce((s,r)=>s+(t2m(r.end)-t2m(r.start)),0);
+}
+
+function dayUsedMins(user, dateStr){
+  const d = dateStr || today();
+  return(S.data.reservations||[]).filter(r=>r.user===user&&r.date===d)
+    .reduce((s,r)=>s+(t2m(r.end)-t2m(r.start)),0);
+}
+
+function dayOperations(user, dateStr){
+  const d = dateStr || today();
+  const log = S.data.activityLog || [];
+  return log.filter(a => {
+    if(a.who !== user) return false;
+    const aDate = new Date(a.ts).toISOString().split('T')[0];
+    if(aDate !== d) return false;
+    return a.type==='res'||a.type==='res-edit'||a.type==='res-del';
+  }).length;
+}
+
+function getDailyLimit(user){
+  const cfg = S.data.config || {};
+  return (user==='santi' ? cfg.santiDailyLimit||5 : cfg.daniDailyLimit||5) * 60;
 }
 
 function todayUsed(user){
@@ -1002,6 +1026,9 @@ function renderChToday(){
   const pct=noLimit?0:Math.min(100,Math.round(weekUsedMins/weekLimit*100));
   const fill=pct>80?'fo':pct>95?'fr':'fb';
   const vac=getActiveVacation(today());
+  const maxDailyOps=(cfg.maxDailyOps||6);
+  const opsUsedToday=dayOperations(user,today());
+  const opsLeft=Math.max(0,maxDailyOps-opsUsedToday);
 
   // Today's slots
   const slots=(S.data.reservations||[]).filter(r=>r.user===user&&r.date===today())
@@ -1038,7 +1065,19 @@ function renderChToday(){
       <div class="stat">
         <div class="slabel">Hoy jugado</div>
         <div class="sval">${fmtM(todayUsedMins)}</div>
-        <div class="ssub">🪙 ${tokens} tokens disponibles</div>
+        <div class="ssub">Límite: ${fmtM(getDailyLimit(user))}</div>
+      </div>
+    </div>
+    <div class="sgrid">
+      <div class="stat">
+        <div class="slabel">🪙 Tokens</div>
+        <div class="sval">${tokens}</div>
+        <div class="ssub">= ${tokens*(cfg.tokenMins||15)} min extra</div>
+      </div>
+      <div class="stat ${opsLeft<=1?'':''}">
+        <div class="slabel">Operaciones hoy</div>
+        <div class="sval" style="color:${opsLeft<=1?'#ef4444':opsLeft<=2?'#f59e0b':'#003087'}">${opsUsedToday}/${maxDailyOps}</div>
+        <div class="ssub" style="color:${opsLeft<=1?'#ef4444':'#94a3b8'}">${opsLeft===0?'Sin operaciones restantes':opsLeft===1?'¡Solo te queda 1!':opsLeft+' restantes'}</div>
       </div>
     </div>
     <div class="card">
@@ -1278,6 +1317,7 @@ function renderAgenda(){
         </div>
         ${daySlots.length===0?empty('📅','Sin reservas este día'):daySlots.map(r=>slotHtml(r,true)).join('')}
         <button class="btn" onclick="openReserve()">+ Nueva reserva</button>
+        <button class="btn bsec" onclick="openRecurringForm()" style="margin-top:8px">🔁 Nueva reserva recurrente</button>
       </div>`;
   } else {
     // Week view
@@ -1341,6 +1381,7 @@ function renderAgenda(){
           <div class="wl-item"><div class="wl-dot" style="background:#ef4444"></div>Conflicto</div>
         </div>
         <button class="btn" onclick="openReserve()" style="margin-top:12px">+ Nueva reserva</button>
+        <button class="btn bsec" onclick="openRecurringForm()" style="margin-top:8px">🔁 Nueva reserva recurrente</button>
       </div>
       <div class="card">
         <div class="ctitle">📋 Todas las reservas próximas</div>
@@ -1678,7 +1719,12 @@ function renderPaConfig(){
     <div class="card">
       <div class="ctitle">👦 Límites semanales</div>
       <div class="fg2"><label class="flabel">Santi — horas/semana</label><input type="number" id="cfg-slim" min="1" max="50" value="${cfg.santiLimit||25}"></div>
+      <div class="fg2"><label class="flabel">Santi — horas máx. al día</label><input type="number" id="cfg-sdaily" min="1" max="12" value="${cfg.santiDailyLimit||5}"></div>
       <div class="fg2"><label class="flabel">Dani — horas/semana</label><input type="number" id="cfg-dlim" min="1" max="50" value="${cfg.daniLimit||20}"></div>
+      <div class="fg2"><label class="flabel">Dani — horas máx. al día</label><input type="number" id="cfg-ddaily" min="1" max="12" value="${cfg.daniDailyLimit||5}"></div>
+      <div class="fg2"><label class="flabel">Máximo operaciones por día (hijos)</label><input type="number" id="cfg-maxops" min="2" max="20" value="${cfg.maxDailyOps||6}">
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px">Crear + modificar + cancelar reservas (por defecto 6)</div>
+      </div>
       <div class="trow">
         <div><div class="tlabel">Santi — Sin límite hoy</div><div style="font-size:11px;color:#94a3b8">Día especial</div></div>
         <div class="sw${cfg.santiNoLimit?' on':''}" id="sw-snl" onclick="toggleSw('sw-snl','santiNoLimit')"></div>
@@ -2018,15 +2064,31 @@ function checkResConflict(){
   if(conflicting.length>0){
     preview.className='alert ad';preview.style.display='block';
     preview.innerHTML=`⚠️ <b>CONFLICTO</b>: Solapa con reserva de <b>${uname(conflicting[0].user)}</b> (${conflicting[0].start}–${conflicting[0].end})`;
-  }else if(isChild(user)&&!cfg[user+'NoLimit']){
-    const limit=(user==='santi'?cfg.santiLimit||25:cfg.daniLimit||20)*60;
-    const used=weekUsed(user)-(editId?(()=>{const r=(S.data.reservations||[]).find(x=>x.id===editId);return r?t2m(r.end)-t2m(r.start):0;})():0);
-    if(used+dur>limit){
-      preview.className='alert aw';preview.style.display='block';
-      preview.innerHTML=`⚠️ Superarías el límite semanal de ${uname(user)}`;
+  }else if(isChild(user)&&!isParent(S.user)){
+    const maxOps = cfg.maxDailyOps||6;
+    const opsUsed = dayOperations(S.user, date);
+    const opsLeft = Math.max(0, maxOps - opsUsed);
+    if(opsLeft<=0){
+      preview.className='alert ad';preview.style.display='block';
+      preview.innerHTML=`❌ Has alcanzado el límite de ${maxOps} operaciones hoy`;
+    }else if(!cfg[user+'NoLimit']){
+      const dailyLimit = getDailyLimit(user);
+      const todayMins = dayUsedMins(user,date)-(editId?(()=>{const r=(S.data.reservations||[]).find(x=>x.id===editId);return r&&r.date===date?t2m(r.end)-t2m(r.start):0;})():0);
+      const weekLimit=(user==='santi'?cfg.santiLimit||25:cfg.daniLimit||20)*60;
+      const used=weekUsed(user)-(editId?(()=>{const r=(S.data.reservations||[]).find(x=>x.id===editId);return r?t2m(r.end)-t2m(r.start):0;})():0);
+      if(todayMins+dur>dailyLimit){
+        preview.className='alert aw';preview.style.display='block';
+        preview.innerHTML=`⚠️ Superarías el límite diario de ${fmtM(dailyLimit)} (llevas ${fmtM(todayMins)} hoy)`;
+      }else if(used+dur>weekLimit){
+        preview.className='alert aw';preview.style.display='block';
+        preview.innerHTML=`⚠️ Superarías el límite semanal`;
+      }else{
+        preview.className='alert as';preview.style.display='block';
+        preview.innerHTML=`✅ ${start}–${end} disponible · Hoy: ${fmtM(todayMins+dur)}/${fmtM(dailyLimit)} · Ops: ${opsUsed+1}/${maxOps}`;
+      }
     }else{
       preview.className='alert as';preview.style.display='block';
-      preview.innerHTML=`✅ ${start}–${end} disponible · Saldo restante: ${fmtM(limit-used-dur)}`;
+      preview.innerHTML=`✅ ${start}–${end} disponible (sin límite)`;
     }
   }else{
     preview.className='alert as';preview.style.display='block';
@@ -2043,11 +2105,27 @@ async function confirmRes(){
   const editId=document.getElementById('res-edit-id').value;
   const cfg=getEffectiveConfig(date);
 
-  if(isChild(user)&&!cfg[user+'NoLimit']&&!isParent(S.user)){
-    const limit=(user==='santi'?cfg.santiLimit||25:cfg.daniLimit||20)*60;
-    const used=weekUsed(user)-(editId?(()=>{const r=(S.data.reservations||[]).find(x=>x.id===editId);return r?t2m(r.end)-t2m(r.start):0;})():0);
-    if(used+dur>limit){toast('Superarías tu límite semanal','d');return;}
-    if(dur>(cfg.maxSession||5)*60){toast(`Máximo ${cfg.maxSession||5}h por sesión`,'d');return;}
+  if(isChild(user)&&!isParent(S.user)){
+    // Check daily operations limit
+    const maxOps = cfg.maxDailyOps || 6;
+    const opsUsed = dayOperations(S.user, date);
+    if(opsUsed >= maxOps){
+      toast(`Límite de ${maxOps} operaciones diarias alcanzado`,'d');
+      return;
+    }
+    // Check daily time limit
+    if(!cfg[user+'NoLimit']){
+      const dailyLimitMins = getDailyLimit(user);
+      const todayMins = dayUsedMins(user, date) - (editId?(()=>{const r=(S.data.reservations||[]).find(x=>x.id===editId);return r&&r.date===date?t2m(r.end)-t2m(r.start):0;})():0);
+      if(todayMins + dur > dailyLimitMins){
+        toast(`Superarías el límite diario de ${fmtM(dailyLimitMins)}`,'d');return;
+      }
+      // Check weekly limit
+      const weekLimit=(user==='santi'?cfg.santiLimit||25:cfg.daniLimit||20)*60;
+      const used=weekUsed(user)-(editId?(()=>{const r=(S.data.reservations||[]).find(x=>x.id===editId);return r?t2m(r.end)-t2m(r.start):0;})():0);
+      if(used+dur>weekLimit){toast('Superarías tu límite semanal','d');return;}
+      if(dur>(cfg.maxSession||5)*60){toast(`Máximo ${cfg.maxSession||5}h por sesión`,'d');return;}
+    }
   }
 
   let reservations=S.data.reservations||[];
@@ -2093,7 +2171,11 @@ function doDelRes(id){
   const r=(S.data.reservations||[]).find(x=>x.id===id);
   const reservations=(S.data.reservations||[]).filter(x=>x.id!==id);
   dbSet('reservations',reservations);
-  if(r)logActivity('res-del',`${uname(S.user)} eliminó reserva de ${uname(r.user)} (${r.date} ${r.start}-${r.end})`);
+  if(r){
+    // Log as operation by the child owner (counts toward their daily limit)
+    const logUser = isChild(r.user) ? r.user : S.user;
+    logActivity('res-del',`${uname(S.user)} eliminó reserva de ${uname(r.user)} (${r.date} ${r.start}-${r.end})`);
+  }
   toast('Reserva eliminada','w');setTimeout(refreshView,300);
 }
 
@@ -2153,7 +2235,10 @@ function saveConfig(){
     weekendStart:document.getElementById('cfg-wes').value,
     weekendEnd:document.getElementById('cfg-wee').value,
     santiLimit:parseInt(document.getElementById('cfg-slim').value)||25,
+    santiDailyLimit:parseInt(document.getElementById('cfg-sdaily').value)||5,
     daniLimit:parseInt(document.getElementById('cfg-dlim').value)||20,
+    daniDailyLimit:parseInt(document.getElementById('cfg-ddaily').value)||5,
+    maxDailyOps:parseInt(document.getElementById('cfg-maxops').value)||6,
     bookingWeeks:parseInt(document.getElementById('cfg-bweeks').value)||2,
     lockoutEnabled:(S.data.config||{}).lockoutEnabled!==false,
     pinNotif:(S.data.config||{}).pinNotif!==false,
@@ -2219,6 +2304,160 @@ function buildConflictListHtml(conflicts){
       + '<span style="color:#ef4444;font-size:18px">›</span>'
       + '</button>';
   }).join('');
+}
+
+// ═══ RECURRING RESERVATIONS ═══
+function openRecurringForm(){
+  modal(
+    '🔁 Nueva reserva recurrente',
+    `<div class="fg2"><label class="flabel">Para</label>
+      <select id="rec-user">
+        <option value="santi">Santi</option>
+        <option value="dani">Dani</option>
+        <option value="jose">Jose</option>
+        <option value="mafe">Mafe</option>
+      </select>
+    </div>
+    <div class="fg2"><label class="flabel">Hora inicio</label>
+      <select id="rec-start">
+        ${Array.from({length:32},(_,i)=>{const m=i*30+540;return m<=1410?'<option value="'+m2t(m)+'">'+m2t(m)+'</option>':''}).join('')}
+      </select>
+    </div>
+    <div class="fg2"><label class="flabel">Duración</label>
+      <select id="rec-dur">
+        <option value="30">30 min</option><option value="60">1 hora</option>
+        <option value="90">1h 30min</option><option value="120">2 horas</option>
+        <option value="150">2h 30min</option><option value="180">3 horas</option>
+        <option value="240">4 horas</option><option value="300">5 horas</option>
+      </select>
+    </div>
+    <div class="fg2"><label class="flabel">Días de la semana</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+        ${['L','M','X','J','V','S','D'].map((d,i)=>
+          '<button type="button" id="rec-day-'+i+'" onclick="toggleRecDay('+i+')" style="width:36px;height:36px;border-radius:50%;border:2px solid #e2e8f0;background:white;font-weight:600;font-size:13px;cursor:pointer">'+d+'</button>'
+        ).join('')}
+      </div>
+    </div>
+    <div class="fg2" style="margin-top:12px"><label class="flabel">Número de semanas</label>
+      <select id="rec-weeks">
+        <option value="1">1 semana</option><option value="2">2 semanas</option>
+        <option value="3">3 semanas</option><option value="4">4 semanas</option>
+        <option value="6">6 semanas</option><option value="8">8 semanas</option>
+      </select>
+    </div>
+    <div id="rec-preview" style="margin-top:8px;font-size:13px;color:#64748b"></div>`,
+    [
+      {label:'Cancelar', cls:'bsec', fn:()=>{}},
+      {label:'Crear reservas', cls:'bsuc', fn:createRecurring}
+    ]
+  );
+  window._recDays = new Set();
+}
+
+function toggleRecDay(dayIndex){
+  if(!window._recDays) window._recDays = new Set();
+  const btn = document.getElementById('rec-day-'+dayIndex);
+  if(window._recDays.has(dayIndex)){
+    window._recDays.delete(dayIndex);
+    btn.style.background = 'white';
+    btn.style.borderColor = '#e2e8f0';
+    btn.style.color = '#1a1a1a';
+  } else {
+    window._recDays.add(dayIndex);
+    btn.style.background = '#0070cc';
+    btn.style.borderColor = '#0070cc';
+    btn.style.color = 'white';
+  }
+  updateRecPreview();
+}
+
+function updateRecPreview(){
+  const el = document.getElementById('rec-preview');
+  if(!el) return;
+  const days = window._recDays || new Set();
+  const weeks = parseInt(document.getElementById('rec-weeks')?.value||2);
+  const dayNames = ['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
+  const selectedDays = [...days].sort().map(d=>dayNames[d]);
+  const total = days.size * weeks;
+  if(days.size===0){
+    el.textContent='Selecciona al menos un día';
+  } else {
+    el.textContent = 'Se crearán '+total+' reservas: '+selectedDays.join(', ')+' durante '+weeks+' semana(s)';
+  }
+}
+
+async function createRecurring(){
+  const user = document.getElementById('rec-user')?.value || 'santi';
+  const start = document.getElementById('rec-start')?.value || '17:00';
+  const dur = parseInt(document.getElementById('rec-dur')?.value || '120');
+  const weeks = parseInt(document.getElementById('rec-weeks')?.value || '2');
+  const days = window._recDays || new Set();
+  const end = m2t(t2m(start)+dur);
+
+  if(days.size===0){toast('Selecciona al menos un día de la semana','d');return;}
+
+  const recurringId = uid(); // group ID for bulk delete
+  const newReservations = [];
+  const today_d = new Date();
+  today_d.setHours(0,0,0,0);
+
+  for(let w=0; w<weeks; w++){
+    for(let d=0; d<7; d++){
+      if(!days.has(d)) continue;
+      // Find next occurrence of this weekday
+      const target = new Date(today_d);
+      // d=0=Monday, d=6=Sunday (our index), JS: 0=Sun,1=Mon...6=Sat
+      const jsDay = d===6?0:d+1; // convert our Mon=0 to JS Sun=0
+      let diff = jsDay - target.getDay();
+      if(diff < 0) diff += 7;
+      if(diff === 0 && w === 0) diff = 0; // include today if matches
+      target.setDate(target.getDate() + diff + w*7);
+      const dateStr = target.toISOString().split('T')[0];
+
+      // Check conflict
+      const conflict = hasConflict(dateStr, start, end);
+      newReservations.push({
+        id: uid(),
+        user, date: dateStr, start, end,
+        createdBy: S.user,
+        ts: Date.now(),
+        recurringId,
+        hasConflict: conflict
+      });
+    }
+  }
+
+  if(newReservations.length===0){toast('No se generaron reservas','d');return;}
+
+  const conflictCount = newReservations.filter(r=>r.hasConflict).length;
+  const reservations = [...(S.data.reservations||[]), ...newReservations];
+  dbSet('reservations', reservations);
+  logActivity('res', uname(S.user)+' creó '+newReservations.length+' reservas recurrentes para '+uname(user));
+
+  if(conflictCount>0){
+    sendNotif('⚡ Reservas recurrentes con conflictos',
+      newReservations.length+' reservas creadas, '+conflictCount+' con conflicto',['jose','mafe']);
+    toast(newReservations.length+' reservas creadas ('+conflictCount+' con conflicto)','w');
+  } else {
+    toast('✅ '+newReservations.length+' reservas creadas','s');
+  }
+  setTimeout(renderAgenda, 300);
+}
+
+function deleteRecurringGroup(recurringId){
+  modal('¿Eliminar serie recurrente?',
+    'Se eliminarán <b>todas las reservas</b> de esta serie recurrente.',
+    [
+      {label:'Cancelar', cls:'bsec', fn:()=>{}},
+      {label:'Eliminar todas', cls:'bdng', fn:()=>{
+        const reservations=(S.data.reservations||[]).filter(r=>r.recurringId!==recurringId);
+        dbSet('reservations',reservations);
+        logActivity('res-del',uname(S.user)+' eliminó serie recurrente');
+        toast('Serie eliminada','w');
+        setTimeout(renderAgenda,300);
+      }}
+    ]
+  );
 }
 
 // ═══ INIT ═══
