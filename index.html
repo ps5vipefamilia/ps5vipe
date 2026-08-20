@@ -243,6 +243,17 @@ input:focus,select:focus{outline:none;border-color:#0070cc;box-shadow:0 0 0 3px 
 .pin-view-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:12px}
 .pin-view-value{font-family:monospace;font-size:22px;font-weight:700;letter-spacing:8px;color:#003087}
 
+/* AUCTION */
+.slot-auction-btn{background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0}
+.auction-card{background:linear-gradient(135deg,#fdf4ff,#f3e8ff);border:2px solid #a855f7;border-radius:14px;padding:18px;margin-bottom:14px}
+.auction-title{font-size:15px;font-weight:700;color:#7c3aed;margin-bottom:12px}
+.auction-bid-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #e9d5ff}
+.auction-timer{background:#7c3aed;color:white;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;font-family:monospace}
+.auction-timer.urgent{background:#ef4444;animation:pulse-red 1s infinite}
+@keyframes pulse-red{0%,100%{opacity:1}50%{opacity:0.7}}
+.bid-btn{background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;border:none;border-radius:8px;padding:12px 20px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;width:100%;margin-top:8px}
+.surrender-btn{background:#f1f5f9;color:#64748b;border:none;border-radius:8px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;width:100%;margin-top:6px}
+
 /* NOTIFICATION ITEM */
 .notif-item{padding:14px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:background 0.2s}
 .notif-item.unread{background:#eff6ff}
@@ -470,16 +481,16 @@ const S={
   def(){
     return {
       config:{
-        maxSession:5, minSlot:30, tokenMins:15, tokenExpire:'never',
+        maxSession:4, minSlot:30, tokenMins:15, tokenExpire:'never',
         weekdayStart:'15:00', weekdayEnd:'23:00',
         weekendStart:'09:00', weekendEnd:'23:59',
         santiLimit:25, daniLimit:20,
         santiDailyLimit:5, daniDailyLimit:5,
-        maxDailyOps:6,
+        maxDailyOps:6, auctionTimeoutMins:1, maxAuctionsPerDay:5, maxAuctionsSimult:2,
         lockoutEnabled:true, pinNotif:true,
         santiNoLimit:false, daniNoLimit:false,
         bookingWeeks:2, lastWeekCheck:'',
-        vacations:[], recurringReservations:[] // [{id,name,start,end,weekdayStart,weekdayEnd,weekendStart,weekendEnd,santiLimit,daniLimit}]
+        vacations:[], recurringReservations:[], auctions:[] // [{id,name,start,end,weekdayStart,weekdayEnd,weekendStart,weekendEnd,santiLimit,daniLimit}]
       },
       pins:{}, locks:{jose:0,mafe:0,santi:0,dani:0},
       blocked:{jose:false,mafe:false,santi:false,dani:false},
@@ -557,6 +568,10 @@ function dbListen(){
       localStorage.setItem('ps5cache',JSON.stringify(S.data));
       refreshView();
       updateBellDot();
+      // Re-start timers for active auctions
+      (S.data.auctions||[]).filter(a=>a.status==='active').forEach(a=>{
+        if(!auctionTimers[a.id]) startAuctionTimer(a.id);
+      });
     }
   });
 }
@@ -624,6 +639,31 @@ function dayOperations(user, dateStr){
 function getDailyLimit(user){
   const cfg = S.data.config || {};
   return (user==='santi' ? cfg.santiDailyLimit||5 : cfg.daniDailyLimit||5) * 60;
+}
+
+function checkPauseRule(user, date, start, end, excId=null){
+  // 1h pause required between own reservations on same day
+  const PAUSE = 60; // minutes
+  const ns = t2m(start), ne = t2m(end);
+  const ownSlots = (S.data.reservations||[]).filter(r =>
+    r.user===user && r.date===date && r.id!==excId
+  );
+  for(const r of ownSlots){
+    const rs = t2m(r.start), re = t2m(r.end);
+    // Check gap before
+    if(ns >= re && ns < re + PAUSE){
+      return `Necesitas al menos 1h de pausa. Tu reserva ${r.start}–${r.end} termina muy cerca.`;
+    }
+    // Check gap after
+    if(ne <= rs && ne > rs - PAUSE){
+      return `Necesitas al menos 1h de pausa. Tu reserva ${r.start}–${r.end} empieza muy pronto.`;
+    }
+    // Check overlap (already caught by conflict check, but just in case)
+    if(ns < re && ne > rs){
+      return `Solapas con tu propia reserva ${r.start}–${r.end}.`;
+    }
+  }
+  return null; // OK
 }
 
 function todayUsed(user){
@@ -1031,8 +1071,11 @@ function renderChToday(){
   const opsLeft=Math.max(0,maxDailyOps-opsUsedToday);
 
   // Today's slots
+  const sibling=user==='santi'?'dani':'santi';
+  const siblingSlots=(S.data.reservations||[]).filter(r=>r.user===sibling&&r.date===today()).sort((a,b)=>a.start.localeCompare(b.start));
   const slots=(S.data.reservations||[]).filter(r=>r.user===user&&r.date===today())
     .sort((a,b)=>a.start.localeCompare(b.start));
+  const allTodayForChild=[...slots,...siblingSlots].sort((a,b)=>a.start.localeCompare(b.start));
 
   // Pending transfers to me
   const pending=(S.data.tokenTransfers||[]).filter(t=>t.to===user&&t.status==='pending');
@@ -1052,7 +1095,9 @@ function renderChToday(){
     </div>`;
   }
 
+  const auctionsSectionHtml=renderAuctionsSection(user);
   document.getElementById('ch-today').innerHTML=`
+    ${auctionsSectionHtml}
     ${transfersHtml}
     ${vac?`<div class="alert aw">🏖️ <b>Vacaciones: ${vac.name}</b> hasta el ${vac.end}. Límite: ${user==='santi'?vac.santiLimit:vac.daniLimit}h/sem · ${vac.weekdayStart}–${vac.weekdayEnd}</div>`:''}
     <div class="sgrid">
@@ -1082,7 +1127,7 @@ function renderChToday(){
     </div>
     <div class="card">
       <div class="ctitle">📅 Mis reservas de hoy</div>
-      ${slots.length===0?empty('📅','Sin reservas hoy','Toca el botón para reservar'):slots.map(r=>slotHtml(r,true)).join('')}
+      ${allTodayForChild.length===0?empty('📅','Sin reservas hoy','Toca el botón para reservar'):allTodayForChild.map(r=>slotHtml(r,r.user===user)).join('')}
       <button class="btn" onclick="openReserve()">+ Nueva reserva</button>
     </div>`;
 }
@@ -1258,6 +1303,7 @@ function renderOverview(){
   if(pendingClaims.length) alerts+=`<div class="alert aw" style="cursor:pointer" onclick="ptab(document.querySelector('#pa-tabs .tab:nth-child(4)'),'pa-tasks')">📋 <b>${pendingClaims.length} tarea(s) pendiente(s)</b> de aprobar — toca para verlas</div>`;
   if(blocked.santi||blocked.dani) alerts+=`<div class="alert ad">🔒 Perfil(es) bloqueado(s) — revisa PINs</div>`;
   if(!alerts) alerts=`<div class="alert as">✅ Todo en orden. Sin alertas.</div>`;
+  const parentAuctionHtml=renderParentAuctions();
 
   const children=[{id:'santi',limit:cfg.santiLimit||25},{id:'dani',limit:cfg.daniLimit||20}];
   const childHtml=children.map(c=>{
@@ -1288,7 +1334,9 @@ function renderOverview(){
       <div class="uinfo"><div class="uname" style="font-size:13px">${a.msg}</div><div class="udet">${relTime(a.ts)}</div></div>
     </div>`).join('');
 
+  const parentAuctionHtml=renderParentAuctions();
   document.getElementById('pa-overview').innerHTML=`
+    ${parentAuctionHtml}
     ${alerts}
     <div class="card"><div class="ctitle">👨‍👩‍👦‍👦 Estado de los hijos</div>${childHtml}</div>
     <div class="card"><div class="ctitle">📅 Reservas de hoy</div>${slotsHtml}
@@ -1688,7 +1736,7 @@ function renderPaConfig(){
   document.getElementById('pa-config').innerHTML=`
     <div class="card">
       <div class="ctitle">⚙️ Configuración general</div>
-      <div class="fg2"><label class="flabel">Sesión máxima (h)</label><input type="number" id="cfg-max" min="1" max="12" value="${cfg.maxSession||5}"></div>
+
       <div class="fg2"><label class="flabel">Franja mínima (min)</label><input type="number" id="cfg-min" min="15" max="120" value="${cfg.minSlot||30}"></div>
       <div class="fg2"><label class="flabel">1 token = (minutos)</label><input type="number" id="cfg-tmins" min="5" max="60" value="${cfg.tokenMins||15}"></div>
       <div class="fg2"><label class="flabel">Tokens caducan</label>
@@ -1724,6 +1772,20 @@ function renderPaConfig(){
       <div class="fg2"><label class="flabel">Dani — horas máx. al día</label><input type="number" id="cfg-ddaily" min="1" max="12" value="${cfg.daniDailyLimit||5}"></div>
       <div class="fg2"><label class="flabel">Máximo operaciones por día (hijos)</label><input type="number" id="cfg-maxops" min="2" max="20" value="${cfg.maxDailyOps||6}">
         <div style="font-size:11px;color:#94a3b8;margin-top:4px">Crear + modificar + cancelar reservas (por defecto 6)</div>
+      </div>
+      <div class="fg2"><label class="flabel">Sesión máxima (h)</label><input type="number" id="cfg-max" min="1" max="12" value="${cfg.maxSession||4}"></div>
+    </div>
+    <div class="card">
+      <div class="ctitle">⚔️ Subastas</div>
+      <div class="fg2"><label class="flabel">Tiempo máximo de respuesta por puja (minutos)</label>
+        <input type="number" id="cfg-auction-timeout" min="1" max="60" value="${cfg.auctionTimeoutMins||1}">
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px">Si el rival no responde en este tiempo, gana la puja más alta</div>
+      </div>
+      <div class="fg2"><label class="flabel">Máximo subastas por día por hijo</label>
+        <input type="number" id="cfg-auction-day" min="1" max="20" value="${cfg.maxAuctionsPerDay||5}">
+      </div>
+      <div class="fg2"><label class="flabel">Máximo subastas simultáneas activas</label>
+        <input type="number" id="cfg-auction-simult" min="1" max="10" value="${cfg.maxAuctionsSimult||2}">
       </div>
       <div class="trow">
         <div><div class="tlabel">Santi — Sin límite hoy</div><div style="font-size:11px;color:#94a3b8">Día especial</div></div>
@@ -1803,21 +1865,19 @@ function deleteVacation(id){
 function slotHtml(r,showActions=false){
   const conflict=hasConflict(r.date,r.start,r.end,r.id);
   const cls=conflict?'sc':slotClass(r.user);
-  const orderMark=conflict?`<span class="slot-order">${getConflictOrder(r)}</span>`:'';
-  const actions=showActions?`<div class="slot-actions">
-    ${isParent(S.user)||r.user===S.user?`<button class="sedit" onclick="openEditReserve('${r.id}')">✏️</button>`:''}
-    <button class="sdel" onclick="confirmDelRes('${r.id}')">✕</button>
-  </div>`:'';
+  const orderMark=conflict?'<span class="slot-order">'+getConflictOrder(r)+'</span>':'';
+  // Can child attack this slot? Only other child's slots
+  const sibling = S.user==='santi'?'dani':'santi';
+  const canAuction = isChild(S.user) && r.user===sibling && r.date>=today();
+  const auctionBtn = canAuction ? '<button class="slot-auction-btn" onclick="openAuctionForm(''+r.id+'')">⚔️</button>' : '';
+  const actions=showActions?'<div class="slot-actions">'
+    +(isParent(S.user)||r.user===S.user?'<button class="sedit" onclick="openEditReserve(''+r.id+'')">✏️</button>':'')
+    +'<button class="sdel" onclick="confirmDelRes(''+r.id+'')">✕</button>'
+    +'</div>':'';
   if(conflict&&isParent(S.user)){
-    return`<button class="slot-conflict-btn" onclick="openConflictForSlot('${r.id}')">
-      <div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%"></div>
-      ${orderMark}
-      <div class="stime">${r.start}–${r.end}</div>
-      <div class="swho">${uname(r.user)}</div>
-      <span style="color:#ef4444;font-size:16px">›</span>
-    </button>`;
+    return'<button class="slot-conflict-btn" onclick="openConflictForSlot(''+r.id+'')"><div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%"></div>'+orderMark+'<div class="stime">'+r.start+'–'+r.end+'</div><div class="swho">'+uname(r.user)+'</div><span style="color:#ef4444;font-size:16px">›</span></button>';
   }
-  return`<div class="slot ${cls}">${orderMark}<div class="sdot"></div><div class="stime">${r.start}–${r.end}</div><div class="swho">${r.user===S.user?'Tuya':uname(r.user)}</div>${actions}</div>`;
+  return'<div class="slot '+cls+'">'+orderMark+'<div class="sdot"></div><div class="stime">'+r.start+'–'+r.end+'</div><div class="swho">'+(r.user===S.user?'Tuya':uname(r.user))+'</div>'+auctionBtn+actions+'</div>';
 }
 
 function getConflictOrder(r){
@@ -2084,7 +2144,17 @@ function checkResConflict(){
         preview.innerHTML=`⚠️ Superarías el límite semanal`;
       }else{
         preview.className='alert as';preview.style.display='block';
-        preview.innerHTML=`✅ ${start}–${end} disponible · Hoy: ${fmtM(todayMins+dur)}/${fmtM(dailyLimit)} · Ops: ${opsUsed+1}/${maxOps}`;
+        const pauseMsg = checkPauseRule(user, date, start, end, editId||null);
+        if(pauseMsg){
+          preview.className='alert aw';preview.style.display='block';
+          preview.innerHTML='⏸️ '+pauseMsg;
+        } else if(dur>(cfg.maxSession||4)*60){
+          preview.className='alert aw';preview.style.display='block';
+          preview.innerHTML='⚠️ Máximo '+fmtM((cfg.maxSession||4)*60)+' por sesión';
+        } else {
+          preview.className='alert as';preview.style.display='block';
+          preview.innerHTML='✅ '+start+'–'+end+' disponible · Hoy: '+fmtM(todayMins+dur)+'/'+fmtM(dailyLimit)+' · Ops: '+(opsUsed+1)+'/'+maxOps;
+        }
       }
     }else{
       preview.className='alert as';preview.style.display='block';
@@ -2124,7 +2194,10 @@ async function confirmRes(){
       const weekLimit=(user==='santi'?cfg.santiLimit||25:cfg.daniLimit||20)*60;
       const used=weekUsed(user)-(editId?(()=>{const r=(S.data.reservations||[]).find(x=>x.id===editId);return r?t2m(r.end)-t2m(r.start):0;})():0);
       if(used+dur>weekLimit){toast('Superarías tu límite semanal','d');return;}
-      if(dur>(cfg.maxSession||5)*60){toast(`Máximo ${cfg.maxSession||5}h por sesión`,'d');return;}
+      if(dur>(cfg.maxSession||4)*60){toast(`Máximo ${fmtM((cfg.maxSession||4)*60)} por sesión`,'d');return;}
+      // Check 1h pause between own reservations
+      const pauseViolation = checkPauseRule(user, date, start, end, editId);
+      if(pauseViolation){toast(pauseViolation,'d');return;}
     }
   }
 
@@ -2239,6 +2312,9 @@ function saveConfig(){
     daniLimit:parseInt(document.getElementById('cfg-dlim').value)||20,
     daniDailyLimit:parseInt(document.getElementById('cfg-ddaily').value)||5,
     maxDailyOps:parseInt(document.getElementById('cfg-maxops').value)||6,
+    auctionTimeoutMins:parseInt(document.getElementById('cfg-auction-timeout')?.value)||1,
+    maxAuctionsPerDay:parseInt(document.getElementById('cfg-auction-day')?.value)||5,
+    maxAuctionsSimult:parseInt(document.getElementById('cfg-auction-simult')?.value)||2,
     bookingWeeks:parseInt(document.getElementById('cfg-bweeks').value)||2,
     lockoutEnabled:(S.data.config||{}).lockoutEnabled!==false,
     pinNotif:(S.data.config||{}).pinNotif!==false,
@@ -2262,6 +2338,356 @@ function toggleSw(swId,cfgKey){
     if(el.classList.contains('on'))sendNotif('🎉 ¡Día especial!','Hoy no tienes límite de tiempo de juego',[who]);
     logActivity('config',`${uname(S.user)} ${el.classList.contains('on')?'activó':'desactivó'} 'Sin límite' para ${uname(who)}`);
   }
+}
+
+// ═══ AUCTION SYSTEM ═══
+let auctionTimers = {}; // {auctionId: intervalId}
+
+function getMyAuctions(){
+  return (S.data.auctions||[]).filter(a=>
+    (a.attacker===S.user||a.defender===S.user) && a.status==='active'
+  );
+}
+
+function getActiveAuctionCount(user){
+  return (S.data.auctions||[]).filter(a=>a.status==='active'&&(a.attacker===user||a.defender===user)).length;
+}
+
+function getAuctionsToday(user){
+  const todayStr=today();
+  return (S.data.auctions||[]).filter(a=>{
+    const d=new Date(a.createdTs).toISOString().split('T')[0];
+    return d===todayStr&&a.attacker===user;
+  }).length;
+}
+
+function openAuctionForm(resId){
+  const res=(S.data.reservations||[]).find(r=>r.id===resId);
+  if(!res){toast('Reserva no encontrada','d');return;}
+  const cfg=S.data.config||{};
+  const myTokens=(S.data.tokens||{})[S.user]||0;
+  const maxPerDay=cfg.maxAuctionsPerDay||5;
+  const maxSimult=cfg.maxAuctionsSimult||2;
+  const todayCount=getAuctionsToday(S.user);
+  const simCount=getActiveAuctionCount(S.user);
+
+  if(todayCount>=maxPerDay){toast('Límite de '+maxPerDay+' subastas por día alcanzado','d');return;}
+  if(simCount>=maxSimult){toast('Ya tienes '+maxSimult+' subastas activas simultáneas','d');return;}
+  if(myTokens<1){toast('Necesitas al menos 1 token para subastar','d');return;}
+
+  // Build hour options within the target reservation
+  const resStart=t2m(res.start), resEnd=t2m(res.end);
+  let hourOpts='';
+  for(let m=resStart;m+60<=resEnd;m+=30){
+    hourOpts+='<option value="'+m2t(m)+'">'+m2t(m)+'–'+m2t(m+60)+'</option>';
+  }
+
+  if(!hourOpts){toast('Esta reserva es demasiado corta para subastar','d');return;}
+
+  modal('⚔️ Iniciar subasta',
+    '<div class="alert aw">⚠️ Estás iniciando una subasta por 1 hora de la reserva de <b>'+uname(res.user)+'</b> ('+res.date+' '+res.start+'–'+res.end+')</div>'
+    +'<div class="fg2"><label class="flabel">Hora que quieres (1h)</label><select id="auc-hour">'+hourOpts+'</select></div>'
+    +'<div class="fg2"><label class="flabel">Tu puja inicial (tokens)</label>'
+    +'<div class="crow" style="margin-bottom:0">'
+    +'<button type="button" class="cbtn" onclick="chgAucBid(-1)">−</button>'
+    +'<div class="cval" id="auc-bid">1</div>'
+    +'<button type="button" class="cbtn" onclick="chgAucBid(1)">+</button>'
+    +'<div class="cnote">Tienes '+myTokens+' 🪙</div>'
+    +'</div></div>'
+    +'<div class="alert ai" id="auc-preview">Si ganas: recibes la franja y pierdes 1 token</div>',
+    [
+      {label:'Cancelar',cls:'bsec',fn:()=>{}},
+      {label:'⚔️ Lanzar subasta',cls:'bid-btn',fn:()=>launchAuction(resId)}
+    ]
+  );
+  window._aucBid=1;
+  window._aucMaxBid=myTokens;
+}
+
+function chgAucBid(d){
+  const max=window._aucMaxBid||1;
+  window._aucBid=Math.max(1,Math.min(max,( window._aucBid||1)+d));
+  const el=document.getElementById('auc-bid');
+  if(el)el.textContent=window._aucBid;
+  const prev=document.getElementById('auc-preview');
+  if(prev)prev.textContent='Si ganas: recibes la franja y pierdes '+window._aucBid+' token(s)';
+}
+
+async function launchAuction(resId){
+  const res=(S.data.reservations||[]).find(r=>r.id===resId);
+  if(!res)return;
+  const cfg=S.data.config||{};
+  const wantedStart=document.getElementById('auc-hour')?.value||res.start;
+  const wantedEnd=m2t(t2m(wantedStart)+60);
+  const bid=window._aucBid||1;
+  const myTokens=(S.data.tokens||{})[S.user]||0;
+  if(bid>myTokens){toast('No tienes suficientes tokens','d');return;}
+
+  const auction={
+    id:uid(),
+    targetResId:resId,
+    attacker:S.user,
+    defender:res.user,
+    wantedStart,
+    wantedEnd,
+    targetDate:res.date,
+    targetStart:res.start,
+    targetEnd:res.end,
+    bids:[{user:S.user,amount:bid,ts:Date.now()}],
+    status:'active',
+    createdTs:Date.now(),
+    lastBidTs:Date.now(),
+    timeoutMins:cfg.auctionTimeoutMins||1,
+    winner:null
+  };
+
+  const auctions=[auction,...(S.data.auctions||[])].slice(0,50);
+  dbSet('auctions',auctions);
+  logActivity('auction',uname(S.user)+' abrió subasta por '+res.date+' '+wantedStart+'–'+wantedEnd+' vs '+uname(res.user));
+  sendNotif('⚔️ ¡Subasta! '+uname(S.user)+' quiere tu hora',
+    uname(S.user)+' quiere '+res.date+' '+wantedStart+'–'+wantedEnd+' · Puja: '+bid+' token(s). Tienes '+( cfg.auctionTimeoutMins||1)+' min para responder.',
+    [res.user,'jose','mafe']);
+  toast('⚔️ Subasta lanzada — '+uname(res.user)+' tiene '+( cfg.auctionTimeoutMins||1)+' min para responder','w');
+  startAuctionTimer(auction.id);
+  setTimeout(renderChToday,300);
+}
+
+function startAuctionTimer(auctionId){
+  if(auctionTimers[auctionId])clearInterval(auctionTimers[auctionId]);
+  auctionTimers[auctionId]=setInterval(()=>{
+    const auction=(S.data.auctions||[]).find(a=>a.id===auctionId);
+    if(!auction||auction.status!=='active'){
+      clearInterval(auctionTimers[auctionId]);
+      delete auctionTimers[auctionId];
+      return;
+    }
+    const timeoutMs=(auction.timeoutMins||1)*60*1000;
+    const elapsed=Date.now()-auction.lastBidTs;
+    if(elapsed>=timeoutMs){
+      clearInterval(auctionTimers[auctionId]);
+      delete auctionTimers[auctionId];
+      resolveAuction(auctionId,'timeout');
+    }
+  },5000); // check every 5s
+}
+
+function getAuctionLeader(auction){
+  if(!auction||!auction.bids||auction.bids.length===0)return null;
+  // Last bidder wins (highest bid by last person who bid)
+  const byUser={};
+  for(const b of auction.bids) byUser[b.user]=b.amount;
+  const users=Object.keys(byUser);
+  return users.reduce((best,u)=>byUser[u]>byUser[best]?u:best,users[0]);
+}
+
+function getTopBid(auction){
+  if(!auction||!auction.bids||auction.bids.length===0)return 0;
+  return Math.max(...auction.bids.map(b=>b.amount));
+}
+
+function getUserBid(auction,user){
+  const bids=auction.bids.filter(b=>b.user===user);
+  return bids.length>0?bids[bids.length-1].amount:0;
+}
+
+async function placeBid(auctionId){
+  const auction=(S.data.auctions||[]).find(a=>a.id===auctionId);
+  if(!auction||auction.status!=='active'){toast('Subasta no activa','d');return;}
+  const myTokens=(S.data.tokens||{})[S.user]||0;
+  const currentTop=getTopBid(auction);
+  const myCurrentBid=getUserBid(auction,S.user);
+
+  modal('⚔️ Pujar en subasta',
+    '<div class="auction-bid-row"><div>Puja más alta actual:</div><div style="font-weight:700;color:#7c3aed">'+currentTop+' 🪙</div></div>'
+    +'<div class="auction-bid-row"><div>Tu puja actual:</div><div style="font-weight:700">'+myCurrentBid+' 🪙</div></div>'
+    +'<div class="auction-bid-row"><div>Tus tokens:</div><div>'+myTokens+' 🪙</div></div>'
+    +'<div class="fg2" style="margin-top:14px"><label class="flabel">Tu nueva puja (debe superar '+currentTop+')</label>'
+    +'<div class="crow" style="margin-bottom:0">'
+    +'<button type="button" class="cbtn" onclick="chgPBid(-1)">−</button>'
+    +'<div class="cval" id="pbid-val">'+(currentTop+1)+'</div>'
+    +'<button type="button" class="cbtn" onclick="chgPBid(1)">+</button>'
+    +'</div></div>',
+    [
+      {label:'No pujo / Me rindo',cls:'surrender-btn',fn:()=>surrenderAuction(auctionId)},
+      {label:'⚔️ Pujar',cls:'bid-btn',fn:()=>submitBid(auctionId,currentTop)}
+    ]
+  );
+  window._pbid=currentTop+1;
+  window._pbidMax=myTokens;
+}
+
+function chgPBid(d){
+  window._pbid=Math.max(1,Math.min(window._pbidMax||1,(window._pbid||1)+d));
+  const el=document.getElementById('pbid-val');
+  if(el)el.textContent=window._pbid;
+}
+
+async function submitBid(auctionId,currentTop){
+  const newBid=window._pbid||currentTop+1;
+  const myTokens=(S.data.tokens||{})[S.user]||0;
+  if(newBid<=currentTop){toast('Tu puja debe superar '+currentTop+' tokens','d');return;}
+  if(newBid>myTokens){toast('No tienes suficientes tokens','d');return;}
+
+  const auctions=(S.data.auctions||[]).map(a=>{
+    if(a.id!==auctionId)return a;
+    return{...a,bids:[...a.bids,{user:S.user,amount:newBid,ts:Date.now()}],lastBidTs:Date.now()};
+  });
+  dbSet('auctions',auctions);
+  const auction=auctions.find(a=>a.id===auctionId);
+  const rival=S.user===auction.attacker?auction.defender:auction.attacker;
+  sendNotif('⚔️ Nueva puja: '+newBid+' tokens',uname(S.user)+' ha pujado '+newBid+' 🪙. Tienes '+(auction.timeoutMins||1)+' min para responder o te rindes.',[rival]);
+  toast('Puja de '+newBid+' 🪙 enviada','s');
+  startAuctionTimer(auctionId);
+  setTimeout(refreshView,300);
+}
+
+async function surrenderAuction(auctionId){
+  // Current user surrenders — the other wins
+  const auction=(S.data.auctions||[]).find(a=>a.id===auctionId);
+  if(!auction||auction.status!=='active')return;
+  const winner=S.user===auction.attacker?auction.defender:auction.attacker;
+  await resolveAuction(auctionId,'surrender',winner);
+}
+
+async function resolveAuction(auctionId,reason,forceWinner=null){
+  const auction=(S.data.auctions||[]).find(a=>a.id===auctionId);
+  if(!auction||auction.status!=='active')return;
+
+  const winner=forceWinner||getAuctionLeader(auction);
+  const loser=winner===auction.attacker?auction.defender:auction.attacker;
+  const winnerBid=getUserBid(auction,winner);
+
+  // Update auction status
+  const auctions=(S.data.auctions||[]).map(a=>
+    a.id===auctionId?{...a,status:'resolved',winner,loser,winnerBid,resolvedTs:Date.now(),resolveReason:reason}:a
+  );
+
+  // Deduct tokens from winner
+  const winnerTokens=(S.data.tokens||{})[winner]||0;
+  const newWinnerTokens=Math.max(0,winnerTokens-winnerBid);
+
+  // Token history entry
+  const tokEntry={id:uid(),user:winner,amount:-winnerBid,
+    reason:'Subasta ganada: '+auction.targetDate+' '+auction.wantedStart+'–'+auction.wantedEnd,
+    by:'system',date:today(),ts:Date.now()};
+  const tokHist=[tokEntry,...(S.data.tokenHistory||[])].slice(0,100);
+
+  // Modify reservations
+  let reservations=[...(S.data.reservations||[])];
+
+  if(winner===auction.attacker){
+    // Attacker wins: trim defender's reservation, create attacker's new one
+    reservations=reservations.map(r=>{
+      if(r.id!==auction.targetResId)return r;
+      // Split or trim the defender's reservation
+      const ws=t2m(auction.wantedStart), we=t2m(auction.wantedEnd);
+      const rs=t2m(r.start), re=t2m(r.end);
+      // Case: wanted chunk is in middle → split into two
+      if(rs<ws&&we<re){
+        return[
+          {...r,end:auction.wantedStart},
+          {...r,id:uid(),start:auction.wantedEnd}
+        ];
+      }
+      // Case: wanted chunk is at start
+      if(ws<=rs&&we<re) return{...r,start:auction.wantedEnd};
+      // Case: wanted chunk is at end
+      if(rs<ws&&re<=we) return{...r,end:auction.wantedStart};
+      // Case: entire reservation is within wanted → remove
+      return null;
+    }).flat().filter(Boolean);
+
+    // Add attacker's new reservation
+    reservations.push({
+      id:uid(),user:winner,date:auction.targetDate,
+      start:auction.wantedStart,end:auction.wantedEnd,
+      createdBy:'system',ts:Date.now(),wonAuction:auctionId
+    });
+  }
+  // If defender wins, no reservation changes needed
+
+  const updates={
+    auctions,
+    ['tokens/'+winner]:newWinnerTokens,
+    tokenHistory:tokHist,
+    reservations
+  };
+  dbUpdate(updates);
+
+  const winReason=reason==='surrender'?'por rendición':'por tiempo agotado';
+  logActivity('auction',uname(winner)+' ganó subasta '+winReason+' ('+winnerBid+' 🪙) · '+auction.targetDate+' '+auction.wantedStart+'–'+auction.wantedEnd);
+  sendNotif('🏆 Subasta resuelta',
+    uname(winner)+' ganó ('+winnerBid+' 🪙). '+auction.targetDate+' '+auction.wantedStart+'–'+auction.wantedEnd,
+    [auction.attacker,auction.defender,'jose','mafe']);
+  toast('🏆 Subasta resuelta — ganó '+uname(winner),'s');
+  setTimeout(refreshView,500);
+}
+
+async function cancelAuctionByParent(auctionId){
+  modal('¿Cancelar subasta?','La subasta se cancelará. Nadie gana ni pierde tokens.',[
+    {label:'No cancelar',cls:'bsec',fn:()=>{}},
+    {label:'Cancelar subasta',cls:'bdng',fn:async()=>{
+      const auctions=(S.data.auctions||[]).map(a=>
+        a.id===auctionId?{...a,status:'cancelled',resolvedTs:Date.now(),resolveReason:'parent'}:a
+      );
+      dbSet('auctions',auctions);
+      const auc=(S.data.auctions||[]).find(a=>a.id===auctionId);
+      if(auc)sendNotif('Subasta cancelada',uname(S.user)+' canceló la subasta',[auc.attacker,auc.defender]);
+      toast('Subasta cancelada','w');
+      setTimeout(refreshView,300);
+    }}
+  ]);
+}
+
+// Render active auctions section for child
+function renderAuctionsSection(user){
+  const auctions=(S.data.auctions||[]).filter(a=>
+    (a.attacker===user||a.defender===user)&&a.status==='active'
+  );
+  if(auctions.length===0)return'';
+
+  return'<div class="card" style="border-color:#a855f7;background:#fdf4ff">'
+    +'<div class="ctitle" style="color:#7c3aed">⚔️ Subastas activas ('+auctions.length+')</div>'
+    +auctions.map(a=>{
+      const isAttacker=a.attacker===user;
+      const rival=isAttacker?a.defender:a.attacker;
+      const topBid=getTopBid(a);
+      const myBid=getUserBid(a,user);
+      const leader=getAuctionLeader(a);
+      const amLeading=leader===user;
+      const elapsed=Date.now()-a.lastBidTs;
+      const timeoutMs=(a.timeoutMins||1)*60*1000;
+      const secsLeft=Math.max(0,Math.round((timeoutMs-elapsed)/1000));
+      const isMyTurn=leader!==user; // it's my turn if I'm NOT the current leader
+
+      return'<div class="auction-card">'
+        +'<div class="auction-title">'+a.targetDate+' '+a.wantedStart+'–'+a.wantedEnd+' vs '+uname(rival)+'</div>'
+        +'<div class="auction-bid-row"><div>Puja líder:</div><div><span class="badge" style="background:#f3e8ff;color:#7c3aed">'+topBid+' 🪙 ('+uname(leader)+')</span></div></div>'
+        +'<div class="auction-bid-row"><div>Tu puja:</div><div style="font-weight:700">'+myBid+' 🪙</div></div>'
+        +'<div class="auction-bid-row"><div>Tiempo restante:</div><div><span class="auction-timer'+(secsLeft<15?' urgent':'')+'">'+secsLeft+'s</span></div></div>'
+        +(isMyTurn
+          ?'<button type="button" class="bid-btn" onclick="placeBid(''+a.id+'')">⚔️ Pujar o rendirme</button>'
+          :'<div class="alert as" style="margin-top:8px">✅ Tú lideras. Esperando respuesta de '+uname(rival)+'...</div>')
+        +'</div>';
+    }).join('')
+    +'</div>';
+}
+
+// Render active auctions for parent overview
+function renderParentAuctions(){
+  const auctions=(S.data.auctions||[]).filter(a=>a.status==='active');
+  if(auctions.length===0)return'';
+  return'<div class="card" style="border-color:#a855f7">'
+    +'<div class="ctitle" style="color:#7c3aed">⚔️ Subastas activas ('+auctions.length+')</div>'
+    +auctions.map(a=>{
+      const topBid=getTopBid(a);
+      return'<div style="background:#fdf4ff;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">'
+        +'<div style="flex:1"><div style="font-weight:600;font-size:14px">'+uname(a.attacker)+' ⚔️ '+uname(a.defender)+'</div>'
+        +'<div style="font-size:12px;color:#64748b">'+a.targetDate+' '+a.wantedStart+'–'+a.wantedEnd+' · Puja: '+topBid+' 🪙</div></div>'
+        +'<button class="sdel" style="background:#fdf4ff;color:#7c3aed;border:1px solid #a855f7" onclick="cancelAuctionByParent(''+a.id+'')">✕</button>'
+        +'</div>';
+    }).join('')
+    +'</div>';
 }
 
 // ═══ CONFLICT HELPERS ═══
