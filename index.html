@@ -1119,7 +1119,7 @@ function renderChToday(){
         <div class="sval">${tokens}</div>
         <div class="ssub">= ${tokens*(cfg.tokenMins||15)} min extra</div>
       </div>
-      <div class="stat ${opsLeft<=1?'':''}">
+      <div class="stat">
         <div class="slabel">Operaciones hoy</div>
         <div class="sval" style="color:${opsLeft<=1?'#ef4444':opsLeft<=2?'#f59e0b':'#003087'}">${opsUsedToday}/${maxDailyOps}</div>
         <div class="ssub" style="color:${opsLeft<=1?'#ef4444':'#94a3b8'}">${opsLeft===0?'Sin operaciones restantes':opsLeft===1?'¡Solo te queda 1!':opsLeft+' restantes'}</div>
@@ -2641,6 +2641,7 @@ async function cancelAuctionByParent(auctionId){
 
 // Render active auctions section for child
 function renderAuctionsSection(user){
+  if(!S.data) return '';
   const auctions=(S.data.auctions||[]).filter(a=>
     (a.attacker===user||a.defender===user)&&a.status==='active'
   );
@@ -2675,6 +2676,7 @@ function renderAuctionsSection(user){
 
 // Render active auctions for parent overview
 function renderParentAuctions(){
+  if(!S.data) return '';
   const auctions=(S.data.auctions||[]).filter(a=>a.status==='active');
   if(auctions.length===0)return'';
   return'<div class="card" style="border-color:#a855f7">'
@@ -2684,7 +2686,7 @@ function renderParentAuctions(){
       return'<div style="background:#fdf4ff;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">'
         +'<div style="flex:1"><div style="font-weight:600;font-size:14px">'+uname(a.attacker)+' ⚔️ '+uname(a.defender)+'</div>'
         +'<div style="font-size:12px;color:#64748b">'+a.targetDate+' '+a.wantedStart+'–'+a.wantedEnd+' · Puja: '+topBid+' 🪙</div></div>'
-        +'<button class="sdel" style="background:#fdf4ff;color:#7c3aed;border:1px solid #a855f7" onclick="cancelAuctionByParent(''+a.id+'')">✕</button>'
+        +'<button class="sdel" style="background:#fdf4ff;color:#7c3aed;border:1px solid #a855f7" onclick="cancelAuctionByParent(\'' + a.id + '\')">✕</button>'
         +'</div>';
     }).join('')
     +'</div>';
