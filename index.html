@@ -1334,7 +1334,6 @@ function renderOverview(){
       <div class="uinfo"><div class="uname" style="font-size:13px">${a.msg}</div><div class="udet">${relTime(a.ts)}</div></div>
     </div>`).join('');
 
-  const parentAuctionHtml=renderParentAuctions();
   document.getElementById('pa-overview').innerHTML=`
     ${parentAuctionHtml}
     ${alerts}
@@ -1869,13 +1868,13 @@ function slotHtml(r,showActions=false){
   // Can child attack this slot? Only other child's slots
   const sibling = S.user==='santi'?'dani':'santi';
   const canAuction = isChild(S.user) && r.user===sibling && r.date>=today();
-  const auctionBtn = canAuction ? '<button class="slot-auction-btn" onclick="openAuctionForm(''+r.id+'')">⚔️</button>' : '';
+  const auctionBtn = canAuction ? '<button class="slot-auction-btn" onclick="openAuctionForm(\''+r.id+'\')">⚔️</button>' : '';
   const actions=showActions?'<div class="slot-actions">'
-    +(isParent(S.user)||r.user===S.user?'<button class="sedit" onclick="openEditReserve(''+r.id+'')">✏️</button>':'')
-    +'<button class="sdel" onclick="confirmDelRes(''+r.id+'')">✕</button>'
+    +(isParent(S.user)||r.user===S.user?'<button class="sedit" onclick="openEditReserve(\''+r.id+'\')">✏️</button>':'')
+    +'<button class="sdel" onclick="confirmDelRes(\''+r.id+'\')">✕</button>'
     +'</div>':'';
   if(conflict&&isParent(S.user)){
-    return'<button class="slot-conflict-btn" onclick="openConflictForSlot(''+r.id+'')"><div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%"></div>'+orderMark+'<div class="stime">'+r.start+'–'+r.end+'</div><div class="swho">'+uname(r.user)+'</div><span style="color:#ef4444;font-size:16px">›</span></button>';
+    return'<button class="slot-conflict-btn" onclick="openConflictForSlot(\''+r.id+'\')"><div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%"></div>'+orderMark+'<div class="stime">'+r.start+'–'+r.end+'</div><div class="swho">'+uname(r.user)+'</div><span style="color:#ef4444;font-size:16px">›</span></button>';
   }
   return'<div class="slot '+cls+'">'+orderMark+'<div class="sdot"></div><div class="stime">'+r.start+'–'+r.end+'</div><div class="swho">'+(r.user===S.user?'Tuya':uname(r.user))+'</div>'+auctionBtn+actions+'</div>';
 }
@@ -2667,7 +2666,7 @@ function renderAuctionsSection(user){
         +'<div class="auction-bid-row"><div>Tu puja:</div><div style="font-weight:700">'+myBid+' 🪙</div></div>'
         +'<div class="auction-bid-row"><div>Tiempo restante:</div><div><span class="auction-timer'+(secsLeft<15?' urgent':'')+'">'+secsLeft+'s</span></div></div>'
         +(isMyTurn
-          ?'<button type="button" class="bid-btn" onclick="placeBid(''+a.id+'')">⚔️ Pujar o rendirme</button>'
+          ?'<button type="button" class="bid-btn" onclick="placeBid(\''+a.id+'\')">⚔️ Pujar o rendirme</button>'
           :'<div class="alert as" style="margin-top:8px">✅ Tú lideras. Esperando respuesta de '+uname(rival)+'...</div>')
         +'</div>';
     }).join('')
