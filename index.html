@@ -213,11 +213,11 @@ input:focus,select:focus{outline:none;border-color:#0070cc;box-shadow:0 0 0 3px 
 .wg-header{text-align:center;padding:6px 2px;font-size:10px;font-weight:700;color:#64748b}
 .wg-time{font-size:10px;color:#94a3b8;text-align:right;padding-right:4px;height:28px;display:flex;align-items:center;justify-content:flex-end}
 .wg-cell{height:28px;border-radius:3px;background:#f8fafc;border:1px solid #f1f5f9;position:relative;overflow:hidden}
-.wg-cell.wg-s{background:rgba(0,112,204,0.2);border-color:rgba(0,112,204,0.3)}
-.wg-cell.wg-d{background:rgba(16,185,129,0.2);border-color:rgba(16,185,129,0.3)}
-.wg-cell.wg-j{background:rgba(0,48,135,0.15);border-color:rgba(0,48,135,0.3)}
-.wg-cell.wg-m{background:rgba(124,58,237,0.15);border-color:rgba(124,58,237,0.3)}
-.wg-cell.wg-c{background:rgba(239,68,68,0.2);border-color:rgba(239,68,68,0.4)}
+.wg-cell.wg-s{background:rgba(0,112,204,0.55);border-color:#0070cc}
+.wg-cell.wg-d{background:rgba(16,185,129,0.55);border-color:#10b981}
+.wg-cell.wg-j{background:rgba(0,48,135,0.55);border-color:#003087}
+.wg-cell.wg-m{background:rgba(124,58,237,0.55);border-color:#7c3aed}
+.wg-cell.wg-c{background:rgba(239,68,68,0.6);border-color:#ef4444}
 .wg-cell.wg-blocked{background:#f1f5f9}
 .week-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
 .wl-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#64748b}
@@ -1434,7 +1434,7 @@ function renderAgenda(){
         <div class="ctitle">📋 Todas las reservas próximas</div>
         ${(S.data.reservations||[]).filter(r=>r.date>=today()).sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)).length===0
           ?empty('📅','Sin reservas próximas')
-          :(S.data.reservations||[]).filter(r=>r.date>=today()).sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)).map(r=>slotHtml(r,true)).join('')}
+          :(S.data.reservations||[]).filter(r=>r.date>=today()).sort((a,b)=>a.date.localeCompare(b.date)||a.start.localeCompare(b.start)).map(r=>slotHtml(r,true,true)).join('')}
       </div>`;
   }
 
@@ -1861,7 +1861,7 @@ function deleteVacation(id){
 
 <script>
 // ═══ SLOT & TOKEN HTML ═══
-function slotHtml(r,showActions=false){
+function slotHtml(r,showActions=false,showDate=false){
   const conflict=hasConflict(r.date,r.start,r.end,r.id);
   const cls=conflict?'sc':slotClass(r.user);
   const orderMark=conflict?'<span class="slot-order">'+getConflictOrder(r)+'</span>':'';
@@ -1873,10 +1873,17 @@ function slotHtml(r,showActions=false){
     +(isParent(S.user)||r.user===S.user?'<button class="sedit" onclick="openEditReserve(\''+r.id+'\')">✏️</button>':'')
     +'<button class="sdel" onclick="confirmDelRes(\''+r.id+'\')">✕</button>'
     +'</div>':'';
+  const dateLbl=showDate?fmtSlotDate(r.date)+' · ':'';
   if(conflict&&isParent(S.user)){
-    return'<button class="slot-conflict-btn" onclick="openConflictForSlot(\''+r.id+'\')"><div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%"></div>'+orderMark+'<div class="stime">'+r.start+'–'+r.end+'</div><div class="swho">'+uname(r.user)+'</div><span style="color:#ef4444;font-size:16px">›</span></button>';
+    return'<button class="slot-conflict-btn" onclick="openConflictForSlot(\''+r.id+'\')"><div class="sdot" style="background:#ef4444;width:10px;height:10px;border-radius:50%"></div>'+orderMark+'<div class="stime">'+dateLbl+r.start+'–'+r.end+'</div><div class="swho">'+uname(r.user)+'</div><span style="color:#ef4444;font-size:16px">›</span></button>';
   }
-  return'<div class="slot '+cls+'">'+orderMark+'<div class="sdot"></div><div class="stime">'+r.start+'–'+r.end+'</div><div class="swho">'+(r.user===S.user?'Tuya':uname(r.user))+'</div>'+auctionBtn+actions+'</div>';
+  return'<div class="slot '+cls+'">'+orderMark+'<div class="sdot"></div><div class="stime">'+dateLbl+r.start+'–'+r.end+'</div><div class="swho">'+(r.user===S.user?'Tuya':uname(r.user))+'</div>'+auctionBtn+actions+'</div>';
+}
+
+function fmtSlotDate(dateStr){
+  if(dateStr===today())return'Hoy';
+  const d=new Date(dateStr+'T12:00:00');
+  return d.toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'});
 }
 
 function getConflictOrder(r){
