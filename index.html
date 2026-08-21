@@ -2753,7 +2753,7 @@ function openRecurringForm(){
   modal(
     '🔁 Nueva reserva recurrente',
     `<div class="fg2"><label class="flabel">Para</label>
-      <select id="rec-user">
+      <select id="rec-user" onchange="updateRecWeeksOptions()">
         <option value="santi">Santi</option>
         <option value="dani">Dani</option>
         <option value="jose">Jose</option>
@@ -2781,11 +2781,8 @@ function openRecurringForm(){
       </div>
     </div>
     <div class="fg2" style="margin-top:12px"><label class="flabel">Número de semanas</label>
-      <select id="rec-weeks">
-        <option value="1">1 semana</option><option value="2">2 semanas</option>
-        <option value="3">3 semanas</option><option value="4">4 semanas</option>
-        <option value="6">6 semanas</option><option value="8">8 semanas</option>
-      </select>
+      <select id="rec-weeks" onchange="updateRecPreview()"></select>
+      <div id="rec-weeks-note" style="font-size:11px;color:#94a3b8;margin-top:4px"></div>
     </div>
     <div id="rec-preview" style="margin-top:8px;font-size:13px;color:#64748b"></div>`,
     [
@@ -2794,6 +2791,27 @@ function openRecurringForm(){
     ]
   );
   window._recDays = new Set();
+  updateRecWeeksOptions();
+}
+
+function updateRecWeeksOptions(){
+  const target=document.getElementById('rec-user')?.value||'santi';
+  const isChildTarget=isChild(target);
+  const sel=document.getElementById('rec-weeks');
+  const note=document.getElementById('rec-weeks-note');
+  if(!sel)return;
+  if(isChildTarget){
+    sel.innerHTML='<option value="1">1 semana</option>';
+    sel.disabled=true;
+    if(note)note.textContent='Los hijos solo pueden crear reservas recurrentes de hasta 1 semana';
+  }else{
+    sel.innerHTML='<option value="1">1 semana</option><option value="2">2 semanas</option>'
+      +'<option value="3">3 semanas</option><option value="4">4 semanas</option>'
+      +'<option value="6">6 semanas</option><option value="8" selected>8 semanas</option>';
+    sel.disabled=false;
+    if(note)note.textContent='';
+  }
+  updateRecPreview();
 }
 
 function toggleRecDay(dayIndex){
@@ -2832,7 +2850,8 @@ async function createRecurring(){
   const user = document.getElementById('rec-user')?.value || 'santi';
   const start = document.getElementById('rec-start')?.value || '17:00';
   const dur = parseInt(document.getElementById('rec-dur')?.value || '120');
-  const weeks = parseInt(document.getElementById('rec-weeks')?.value || '2');
+  let weeks = parseInt(document.getElementById('rec-weeks')?.value || '2');
+  if(isChild(user)) weeks = 1; // safety net: children capped at 1 week regardless of UI state
   const days = window._recDays || new Set();
   const end = m2t(t2m(start)+dur);
 
