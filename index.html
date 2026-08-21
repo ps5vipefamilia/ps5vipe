@@ -489,7 +489,7 @@ const S={
         maxDailyOps:6, auctionTimeoutMins:1, maxAuctionsPerDay:5, maxAuctionsSimult:2,
         lockoutEnabled:true, pinNotif:true,
         santiNoLimit:false, daniNoLimit:false,
-        bookingWeeks:2, lastWeekCheck:'',
+        childBookingDays:7, lastWeekCheck:'',
         vacations:[], recurringReservations:[], auctions:[] // [{id,name,start,end,weekdayStart,weekdayEnd,weekendStart,weekendEnd,santiLimit,daniLimit}]
       },
       pins:{}, locks:{jose:0,mafe:0,santi:0,dani:0},
@@ -1745,14 +1745,17 @@ function renderPaConfig(){
           <option value="monthly" ${cfg.tokenExpire==='monthly'?'selected':''}>Fin de mes</option>
         </select>
       </div>
-      <div class="fg2"><label class="flabel">Antelación máxima para reservar</label>
-        <select id="cfg-bweeks">
-          <option value="1" ${(cfg.bookingWeeks||2)==1?'selected':''}>1 semana</option>
-          <option value="2" ${(cfg.bookingWeeks||2)==2?'selected':''}>2 semanas (recomendado)</option>
-          <option value="3" ${(cfg.bookingWeeks||2)==3?'selected':''}>3 semanas</option>
-          <option value="4" ${(cfg.bookingWeeks||2)==4?'selected':''}>4 semanas</option>
-          <option value="8" ${(cfg.bookingWeeks||2)==8?'selected':''}>8 semanas</option>
+      <div class="fg2"><label class="flabel">Antelación máxima para reservar (hijos)</label>
+        <select id="cfg-bdays">
+          <option value="3" ${(cfg.childBookingDays||7)==3?'selected':''}>3 días</option>
+          <option value="5" ${(cfg.childBookingDays||7)==5?'selected':''}>5 días</option>
+          <option value="7" ${(cfg.childBookingDays||7)==7?'selected':''}>7 días (recomendado)</option>
+          <option value="10" ${(cfg.childBookingDays||7)==10?'selected':''}>10 días</option>
+          <option value="14" ${(cfg.childBookingDays||7)==14?'selected':''}>14 días</option>
+          <option value="21" ${(cfg.childBookingDays||7)==21?'selected':''}>21 días</option>
+          <option value="30" ${(cfg.childBookingDays||7)==30?'selected':''}>30 días</option>
         </select>
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px">Los padres no tienen límite de antelación</div>
       </div>
     </div>
     <div class="card">
@@ -2053,14 +2056,20 @@ async function rejectTaskClaim(claimId){
 }
 
 // ═══ RESERVATIONS ═══
+function bookingHorizonDays(){
+  // Parents have no advance-booking limit; children are limited by cfg.childBookingDays
+  if(isParent(S.user))return 365;
+  const cfg=S.data.config||{};
+  return cfg.childBookingDays||7;
+}
+
 function openReserve(){
   document.getElementById('res-edit-id').value='';
   document.getElementById('res-form-title').textContent='Nueva reserva';
   document.getElementById('res-user-wrap').style.display=isParent(S.user)?'block':'none';
-  const cfg=S.data.config||{};
-  const weeks=cfg.bookingWeeks||2;
+  const days=bookingHorizonDays();
   const dayEl=document.getElementById('res-day');
-  dayEl.innerHTML=Array.from({length:weeks*7},(_,i)=>{
+  dayEl.innerHTML=Array.from({length:days},(_,i)=>{
     const d=new Date();d.setDate(d.getDate()+i);
     const val=d.toISOString().split('T')[0];
     const lbl=i===0?'Hoy, '+d.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'short'}):d.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'short'});
@@ -2078,10 +2087,9 @@ function openEditReserve(resId){
   document.getElementById('res-edit-id').value=resId;
   document.getElementById('res-form-title').textContent='Editar reserva';
   document.getElementById('res-user-wrap').style.display=isParent(S.user)?'block':'none';
-  const cfg=S.data.config||{};
-  const weeks=cfg.bookingWeeks||2;
+  const days=bookingHorizonDays();
   const dayEl=document.getElementById('res-day');
-  dayEl.innerHTML=Array.from({length:weeks*7},(_,i)=>{
+  dayEl.innerHTML=Array.from({length:days},(_,i)=>{
     const d=new Date();d.setDate(d.getDate()+i);
     const val=d.toISOString().split('T')[0];
     const lbl=i===0?'Hoy, '+d.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'short'}):d.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'short'});
@@ -2321,7 +2329,7 @@ function saveConfig(){
     auctionTimeoutMins:parseInt(document.getElementById('cfg-auction-timeout')?.value)||1,
     maxAuctionsPerDay:parseInt(document.getElementById('cfg-auction-day')?.value)||5,
     maxAuctionsSimult:parseInt(document.getElementById('cfg-auction-simult')?.value)||2,
-    bookingWeeks:parseInt(document.getElementById('cfg-bweeks').value)||2,
+    childBookingDays:parseInt(document.getElementById('cfg-bdays').value)||7,
     lockoutEnabled:(S.data.config||{}).lockoutEnabled!==false,
     pinNotif:(S.data.config||{}).pinNotif!==false,
     santiNoLimit:document.getElementById('sw-snl')?.classList.contains('on')||false,
